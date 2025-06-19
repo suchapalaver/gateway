@@ -114,7 +114,7 @@ impl Reporter {
                 allocation: indexer_request.receipt.allocation().to_vec(),
                 indexed_chain: indexer_request.subgraph_chain.clone(),
                 url: indexer_request.url.clone(),
-                fee_grt: indexer_request.receipt.value() as f64 * 1e-18,
+                fee_grt: f64::from(indexer_request.receipt.value()) * 1e-18,
                 response_time_ms: indexer_request.response_time_ms as u32,
                 seconds_behind: indexer_request.seconds_behind,
                 result: indexer_request
@@ -140,7 +140,7 @@ impl Reporter {
         let total_fees_grt: f64 = client_request
             .indexer_requests
             .iter()
-            .map(|i| i.receipt.value() as f64 * 1e-18)
+            .map(|i| f64::from(i.receipt.value()) * 1e-18)
             .sum();
         let total_fees_usd: f64 = total_fees_grt / *client_request.grt_per_usd;
 

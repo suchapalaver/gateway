@@ -19,7 +19,10 @@ use prost::bytes::Buf;
 use rand::Rng as _;
 use serde::Deserialize;
 use serde_json::value::RawValue;
-use thegraph_core::{AllocationId, DeploymentId, IndexerId, alloy::primitives::BlockNumber};
+use thegraph_core::{
+    AllocationId, DeploymentId, IndexerId,
+    alloy::primitives::{BlockNumber, U256},
+};
 use thegraph_headers::{HttpBuilderExt as _, graph_attestation::GraphAttestation};
 use tokio::sync::mpsc;
 use tracing::{Instrument as _, info_span};
@@ -233,6 +236,7 @@ async fn resolve_subgraph_info(
 /// Kafka Export ← Performance Updates ← Budget Feedback ← Error Tracking
 /// ```
 ///
+#[allow(clippy::too_many_arguments)]
 async fn run_indexer_queries(
     ctx: Context,
     request_id: String,
@@ -349,8 +353,14 @@ async fn run_indexer_queries(
             // over-pay indexers to hit target
             let min_fee = *(min_fee.0 * grt_per_usd * one_grt) / selections.len() as f64;
             let indexer_fee = selection.fee.as_f64() * budget as f64;
-            let fee = indexer_fee.max(min_fee) as u128;
-            let receipt = match ctx.receipt_signer.create_receipt(largest_allocation, fee) {
+            let fee = U256::from(indexer_fee.max(min_fee) as u128);
+            let receipt = match ctx.receipt_signer.create_receipt(
+                largest_allocation,
+                fee,
+                ctx.receipt_signer.payer_address(),
+                indexer.into_inner(),
+                indexer.into_inner(),
+            ) {
                 Ok(receipt) => receipt,
                 Err(err) => {
                     tracing::error!(?indexer, %deployment, error=?err, "failed to create receipt");
@@ -436,7 +446,7 @@ async fn run_indexer_queries(
 
     let total_fees_grt: f64 = indexer_requests
         .iter()
-        .map(|i| i.receipt.value() as f64 * 1e-18)
+        .map(|i| f64::from(i.receipt.value()) * 1e-18)
         .sum();
     let total_fees_usd = USD(NotNan::new(total_fees_grt / *grt_per_usd).unwrap());
     let _ = ctx.budgeter.feedback.send(total_fees_usd);
@@ -482,7 +492,7 @@ async fn run_indexer_queries(
             result = ?indexer_request.result.as_ref().map(|_| ()),
             response_time_ms = indexer_request.response_time_ms,
             seconds_behind = indexer_request.seconds_behind,
-            fee = indexer_request.receipt.value() as f64 * 1e-18,
+            fee = f64::from(indexer_request.receipt.value()) * 1e-18,
             "indexer_request"
         );
         tracing::trace!(indexer_request = indexer_request.request);
@@ -744,10 +754,16 @@ pub async fn handle_indexer_query(
     // Use budget as fee.
     let grt_per_usd = *ctx.grt_per_usd.borrow();
     let one_grt = NotNan::new(1e18).unwrap();
-    let fee = *(ctx.budgeter.query_fees_target.0 * grt_per_usd * one_grt) as u128;
+    let fee = U256::from(*(ctx.budgeter.query_fees_target.0 * grt_per_usd * one_grt) as u128);
 
     let allocation = indexing.largest_allocation;
-    let receipt = match ctx.receipt_signer.create_receipt(allocation, fee) {
+    let receipt = match ctx.receipt_signer.create_receipt(
+        allocation,
+        fee,
+        ctx.receipt_signer.payer_address(),
+        indexer.into_inner(),
+        indexer.into_inner(),
+    ) {
         Ok(receipt) => receipt,
         Err(err) => {
             return Err(Error::Internal(anyhow!("failed to create receipt: {err}")));
@@ -814,7 +830,7 @@ pub async fn handle_indexer_query(
         result = ?indexer_request.result.as_ref().map(|_| ()),
         response_time_ms = indexer_request.response_time_ms,
         seconds_behind = indexer_request.seconds_behind,
-        fee = indexer_request.receipt.value() as f64 * 1e-18,
+        fee = f64::from(indexer_request.receipt.value()) * 1e-18,
         "indexer_request"
     );
 
